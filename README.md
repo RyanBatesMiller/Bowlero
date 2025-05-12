@@ -7,11 +7,7 @@ Bowlero is an interactive 3D bowling simulator set in a retro bowling alley. The
 `node -v` and `npm -v`. I have `v22.7.0` and `10.8.2`.
 If you don't have npm installed, you can install it by following [the instructions](https://nodejs.org/en/download/package-manager).
 
-## Initialize a new Node.js project by running:
-```bash 
-npm init -y
-```
-## install `Three.js` and `vite` by running:
+## Install `Three.js` and `vite` by running:
 ```bash
 # three.js
 npm install --save three
@@ -19,7 +15,6 @@ npm install --save three
 # vite
 npm install --save-dev vite
 ```
-You should now have a `node_modules` folder and a `package.json` file in your project directory.
 
 ## Now we need to start the web server and see the result in the browser. In your terminal, run:
 ```bash
