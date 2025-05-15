@@ -6,6 +6,7 @@ import * as THREE from 'three';
 // core objects (filled in init)
 let scene, camera, renderer;
 
+const DEG2RAD = Math.PI / 180;
 
 // input state
 const keyStates     = {};

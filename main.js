@@ -108,11 +108,8 @@ function* rollBall(obj) {
 function update() {
     let deltaTime = getDeltaTime();
 
-    // moves at 1 unit/sec left/right (scaled by deltaTime internally)
     if (getKeyDown('ArrowUp'))  {
         startCoroutine(rollBall(ball));
-        // ball.translateWorld(Vector3(0, 0, deltaTime * 2));
-        // ball.rotate(Vector3(deltaTime * 100, 0, 0));
     }
 
     if (getKey('ArrowDown')) {
@@ -123,5 +120,4 @@ function update() {
     camera.lookAt(ball.position());
 }
 
-// wire your game logic into the engine
 init(start, update);
