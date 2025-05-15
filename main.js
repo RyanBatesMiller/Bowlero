@@ -1,123 +1,174 @@
-// main.js
-import { init, getCamera, spawnCube, 
-    spawnSphere, getKey, getKeyDown,
-    getDeltaTime, destroy, Vector3, startCoroutine } from './engine.js';
+import { init, getCamera, spawnCube, spawnSphere, getKeyDown, getDeltaTime, Vector3 } from './engine.js';
+import * as CANNON from 'cannon-es';
 
-//Transform: translate(Vector3), translateWorld, setPosition, rotate, setRotation, lookAt
-//NOTE: rotation y = 0 faces towards -z direction
+let world;
+let ballBody;
+let ballMesh;
+const pinBodies = [];
+const pinMeshes = [];
+let camera;
 
-let ball = null;
-let camera = null;
-let pin = null;
+// Initialize the physics world
+function createPhysics() {
+  world = new CANNON.World();
+  world.gravity.set(0, -9.82, 0);
+  world.solver.iterations = 20; // Increase solver iterations for better accuracy
 
+  // Define materials
+  const groundMaterial = new CANNON.Material('ground');
+  const pinMaterial = new CANNON.Material('pin');
+  const ballMaterial = new CANNON.Material('ball');
+
+  // Ground plane
+  const groundBody = new CANNON.Body({ mass: 0, material: groundMaterial });
+  groundBody.addShape(new CANNON.Plane());
+  groundBody.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
+  world.addBody(groundBody);
+
+  // Contact materials
+  world.addContactMaterial(new CANNON.ContactMaterial(groundMaterial, pinMaterial, {
+    friction: 0.8,    // High friction to keep pins stable
+    restitution: 0.1  // Low restitution to prevent bouncing
+  }));
+  world.addContactMaterial(new CANNON.ContactMaterial(ballMaterial, pinMaterial, {
+    friction: 0.2,    // Moderate friction for ball-pin interaction
+    restitution: 0.1  // Lower restitution to reduce ball bouncing off pins
+  }));
+  world.addContactMaterial(new CANNON.ContactMaterial(pinMaterial, pinMaterial, {
+    friction: 0.5,    // Adjusted for realistic pin-to-pin sliding
+    restitution: 0.2  // Slightly increased for pin-to-pin collisions
+  }));
+  world.addContactMaterial(new CANNON.ContactMaterial(ballMaterial, groundMaterial, {
+    friction: 0.05,   // Low friction for slippery lane
+    restitution: 0.0  // No bouncing off the ground
+  }));
+
+  return { pinMaterial, ballMaterial };
+}
+
+// Spawn a single pin at a given position
+function spawnPin(position, pinMaterial) {
+  // Visual: single tall cube for body + small sphere for head
+  const body = spawnCube(
+    Vector3(position.x, 0.75, position.z), // Center the visual at (x, 0.75, z)
+    Vector3(0, 0, 0),
+    Vector3(0.3, 1.5, 0.3),
+    0xFFFFFF
+  );
+  const head = spawnSphere(
+    Vector3(position.x, 1.5, position.z),
+    Vector3(0, 0, 0),
+    Vector3(0.15, 0.15, 0.15),
+    0xFFFFFF
+  );
+  head.setParent(body);
+
+  // Red band
+  const band = spawnCube(
+    Vector3(position.x, 1.1, position.z),
+    Vector3(0, 0, 0),
+    Vector3(0.32, 0.05, 0.32),
+    0xFF0000
+  );
+  band.setParent(body);
+
+  // Physics: single cylinder centered at (x, 0.75, z)
+  const pinBody = new CANNON.Body({ mass: 1.54, material: pinMaterial }); // 3.4 lbs
+  const cyl = new CANNON.Cylinder(0.15, 0.15, 1.5, 16);
+  pinBody.addShape(cyl, new CANNON.Vec3(0, 0, 0)); // No offset, centered at body position
+  pinBody.position.set(position.x, 0.75, position.z); // Set body position to (x, 0.75, z)
+  pinBody.linearDamping = 0.3;
+  world.addBody(pinBody);
+
+  pinMeshes.push(body);
+  pinBodies.push(pinBody);
+}
+
+// Arrange 10 pins in a triangle formation
+function spawnAllPins(pinMaterial) {
+  const rows = [1, 2, 3, 4]; // apex to base
+  const startZ = -4;          // apex row position
+  const rowSpacing = 1.2;     // spacing between rows
+  const xSpacing = 1.2;       // spacing between pins
+
+  rows.forEach((count, r) => {
+    const z = startZ - r * rowSpacing;
+    const offset = ((count - 1) * xSpacing) / 2;
+    for (let i = 0; i < count; i++) {
+      const x = (i * xSpacing) - offset;
+      spawnPin(Vector3(x, 0, z), pinMaterial); // Pass position with y=0, adjusted in spawnPin
+    }
+  });
+}
+
+// Setup scene, physics, and camera
 function start() {
+  const { pinMaterial, ballMaterial } = createPhysics();
 
-    //******* platform scenery *******
+  // Lane surface
+  spawnCube(
+    Vector3(0, -0.5, -5),
+    Vector3(0, 0, 0),
+    Vector3(5, 0.75, 20),
+    0xfac75a
+  );
 
-    //base
-    spawnCube(
-        Vector3(0, -0.5, -5),
-        Vector3(0, 0, 0),
-        Vector3(5, .75, 20),
-        0xfac75a
-    );
+  // Pins
+  spawnAllPins(pinMaterial);
 
-    pin = spawnCube(
-        Vector3(0, 0.2, -5),
-        Vector3(0, 0, 0),
-        Vector3(0.5, 1, 0.5),
-        0xFFFFFF
-    );
+  // Camera
+  camera = getCamera();
+  camera.setPosition(Vector3(0, 3, 7));
+  camera.setRotation(Vector3(0, 0, 0));
 
-    //******* platform end *******
+  // Ball mesh
+  ballMesh = spawnSphere(
+    Vector3(0, 0.25, 3),
+    Vector3(0, 0, 0),
+    Vector3(0.42, 0.42, 0.42),
+    0x7777FF
+  );
 
-    camera = getCamera();
-
-    camera.setPosition(Vector3(0, 3, 7))
-    camera.setRotation(Vector3(0, 0, 0))
-
-    //bowling ball!
-    ball = spawnSphere(
-      Vector3(0, 0.25, 3),
-      Vector3(0, 0, 0),
-      Vector3(0.42, 0.42, 0.42),
-      0x7777FF
-    );
-
-    //little dots on ball
-    let dot1 = spawnSphere(
-        Vector3(0, .6, 3.1),
-          Vector3(0, 0, 0),
-          Vector3(0.1, 0.1, 0.1),
-          0xAAAAFF
-    );
-    dot1.setParent(ball);
-
-    let dot2 = spawnSphere(
-        Vector3(-0.15, .39, 3.3),
-          Vector3(0, 0, 0),
-          Vector3(0.1, 0.1, 0.1),
-          0xAAAAFF
-    );
-    dot2.setParent(ball);
-
-    let dot3 = spawnSphere(
-        Vector3(0.15, .39, 3.3),
-          Vector3(0, 0, 0),
-          Vector3(0.1, 0.1, 0.1),
-          0xAAAAFF
-    );
-    dot3.setParent(ball);
-
-    ball.translateWorld(Vector3(0,0,0.5));
-
-    camera.lookAt(ball.position())
+  // Ball physics body
+  const ballShape = new CANNON.Sphere(0.42);
+  ballBody = new CANNON.Body({ mass: 5.9, material: ballMaterial }); // 13 lbs
+  ballBody.addShape(ballShape);
+  ballBody.position.set(0, 0.25, 3);
+  ballBody.linearDamping = 0.05;
+  world.addBody(ballBody);
 }
 
-let pinHit = false;
-function* ejectPin(obj) {
-    let time = 1.5;
-    for (let i = 0; i < time; i += getDeltaTime()) {
-        let speed = time - i;
-        pin.translateWorld(Vector3(
-            -speed * getDeltaTime(), 0, 
-            -speed * getDeltaTime() * 2));
-        pin.rotate(Vector3(
-            getDeltaTime() * -speed * 75, 0, 0
-        ));
-        yield 0;
-    }
-}
-
-//NOTE: this is a "coroutine" from unity; invoke with startCoroutine(func())
-function* rollBall(obj) {
-    let time = 2;
-    for (let i = 0; i < time; i += getDeltaTime()) {
-        let speed = time - i;
-        obj.translateWorld(Vector3(0, 0, getDeltaTime() * speed * -8));
-        obj.rotate(Vector3(getDeltaTime() * speed * -1000, 0, 0));
-
-        if (ball.position().z < pin.position().z + 0.1 && !pinHit) {
-            pinHit = true;
-            startCoroutine(ejectPin(pin));
-        }
-        yield 0;
-    }
-}
-
+// Main loop: physics step, sync meshes, input handling
 function update() {
-    let deltaTime = getDeltaTime();
+  const dt = getDeltaTime();
+  world.step(1 / 120, dt, 10); // Use fixed time step for better accuracy
 
-    if (getKeyDown('ArrowUp'))  {
-        startCoroutine(rollBall(ball));
-    }
+  // Sync ball mesh
+  const b = ballBody.position;
+  ballMesh.translateWorld(
+    Vector3(b.x - ballMesh.position().x,
+            b.y - ballMesh.position().y,
+            b.z - ballMesh.position().z)
+  );
 
-    if (getKey('ArrowDown')) {
-        ball.translateWorld(Vector3(0, 0, deltaTime * 4));
-        ball.rotate(Vector3(deltaTime * 1000, 0, 0));
-    }
+  // Sync pin meshes
+  for (let i = 0; i < pinBodies.length; i++) {
+    const pb = pinBodies[i].position;
+    const pm = pinMeshes[i];
+    pm.translateWorld(
+      Vector3(pb.x - pm.position().x,
+              pb.y - pm.position().y,
+              pb.z - pm.position().z)
+    );
+  }
 
-    camera.lookAt(ball.position());
+  // Launch the ball
+  if (getKeyDown('ArrowUp')) {
+    ballBody.applyLocalImpulse(new CANNON.Vec3(0, 0, -150), new CANNON.Vec3(0, 0, 0)); // Increased impulse
+  }
+
+  // Camera follow
+  camera.lookAt(ballMesh.position());
 }
 
 init(start, update);
