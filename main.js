@@ -1,12 +1,49 @@
 import { init, getCamera, spawnCube, spawnSphere, getKeyDown, getDeltaTime, Vector3 } from './engine.js';
 import * as CANNON from 'cannon-es';
+import { ScoreManager } from './ScoreManager.js';
 
+const uiContainer = document.createElement('div');
+Object.assign(uiContainer.style, {
+  position: 'absolute',
+  top: '5%',               // vertically center
+  left: '50%',              // horizontally center
+  transform: 'translate(-50%, -50%)',
+  backgroundColor: 'rgba(30, 30, 30, 0.8)',  // dark semi‑transparent box
+  padding: '16px 24px',
+  borderRadius: '12px',
+  textAlign: 'center',
+  color: '#FF8856',
+  fontFamily: 'Arial, sans-serif',
+  zIndex: 10,
+  pointerEvents: 'none'
+});
+
+const titleElem = document.createElement('h1');
+titleElem.innerText = 'Bowlero';
+titleElem.style.fontSize = '36px';
+titleElem.style.margin = '0 0 8px 0';
+uiContainer.appendChild(titleElem);
+
+const scoreElem = document.createElement('div');
+scoreElem.innerText = 'Score: ';
+scoreElem.style.fontSize = '28px';
+scoreElem.style.margin = '0';
+uiContainer.appendChild(scoreElem);
+
+document.body.appendChild(uiContainer);
+
+let score = new ScoreManager;
 let world;
 let ballBody;
 let ballMesh;
 const pinBodies = [];
 const pinMeshes = [];
 let camera;
+let hasLaunched = false;
+const scoredPins = new Set();
+const pinOriginalPositions = [];
+
+
 
 // Initialize the physics world
 function createPhysics() {
@@ -69,12 +106,14 @@ function spawnPin(position, pinMaterial) {
     Vector3(0, 0, 0),
     Vector3(0.32, 0.05, 0.32),
     0xFF0000
+
   );
   band.setParent(body);
 
   // Physics: single cylinder centered at (x, 0.75, z)
   const pinBody = new CANNON.Body({ mass: 1.54, material: pinMaterial }); // 3.4 lbs
   const cyl = new CANNON.Cylinder(0.15, 0.15, 1.5, 16);
+  
   pinBody.addShape(cyl, new CANNON.Vec3(0, 0, 0)); // No offset, centered at body position
   pinBody.position.set(position.x, 0.75, position.z); // Set body position to (x, 0.75, z)
   pinBody.linearDamping = 0.3;
@@ -82,6 +121,7 @@ function spawnPin(position, pinMaterial) {
 
   pinMeshes.push(body);
   pinBodies.push(pinBody);
+  pinOriginalPositions.push(pinBody.position.clone());
 }
 
 // Arrange 10 pins in a triangle formation
@@ -103,6 +143,7 @@ function spawnAllPins(pinMaterial) {
 
 // Setup scene, physics, and camera
 function start() {
+
   const { pinMaterial, ballMaterial } = createPhysics();
 
   // Lane surface
@@ -136,10 +177,29 @@ function start() {
   ballBody.position.set(0, 0.25, 3);
   ballBody.linearDamping = 0.05;
   world.addBody(ballBody);
+
+  hasLaunched = false;
+
 }
+
+function reset() {
+  for (const body of world.bodies) {
+    if (body.mass > 0) {
+      world.removeBody(body);
+    }
+  }
+  world.removeBody(ballBody);
+  ballBody = null;
+  ballMesh = null;
+  pinBodies.length = 0; 
+  scoredPins.clear();
+  start();
+}
+
 
 // Main loop: physics step, sync meshes, input handling
 function update() {
+
   const dt = getDeltaTime();
   world.step(1 / 120, dt, 10); // Use fixed time step for better accuracy
 
@@ -162,13 +222,41 @@ function update() {
     );
   }
 
-  // Launch the ball
-  if (getKeyDown('ArrowUp')) {
-    ballBody.applyLocalImpulse(new CANNON.Vec3(0, 0, -150), new CANNON.Vec3(0, 0, 0)); // Increased impulse
+  pinBodies.forEach((pinBody, idx) => {
+    if (scoredPins.has(idx)) return;
+
+    const original = pinOriginalPositions[idx];
+    const current  = pinBody.position;
+
+    const dx = current.x - original.x;
+    const dy = current.y - original.y;
+    const dz = current.z - original.z;
+    const distance = Math.sqrt(dx*dx + dy*dy + dz*dz);
+
+    // if it’s moved more than 0.4 units from spawn
+    if (distance > 0.4) {
+      scoredPins.add(idx);
+      score.add(1);
+      scoreElem.innerText = `Score: ${score.getScore()}`;
+    }
+  });
+
+  /*
+  if (getKeyDown('r')) {
+    reset();
+  }
+  */
+
+  if (getKeyDown('ArrowUp') && !hasLaunched) {
+    hasLaunched = true;
+    ballBody.applyLocalImpulse(
+      new CANNON.Vec3(0, 0, -150),
+      new CANNON.Vec3(0, 0, 0)
+    );
   }
 
-  // Camera follow
   camera.lookAt(ballMesh.position());
+  
 }
 
 init(start, update);
