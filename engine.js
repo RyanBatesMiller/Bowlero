@@ -173,6 +173,10 @@ export function startCoroutine(genFunc, ...args) {
     coroutines.push({ iterator, wait: 0 });
 }
 
+export function getScene() {
+  return scene;
+}
+
 // engine init & loop
 export function init(startCallback, updateCallback) {
     scene = new THREE.Scene();
@@ -184,8 +188,8 @@ export function init(startCallback, updateCallback) {
     renderer.shadowMap.enabled = true;
     document.body.appendChild(renderer.domElement);
 
-    scene.add(new THREE.AmbientLight(0xFFFFFF));
-    const dl = new THREE.DirectionalLight(0xffffff, 1.5);
+    scene.add(new THREE.AmbientLight(0xFFFFFF, 1));
+    const dl = new THREE.DirectionalLight(0xFFFFCC, 1);
     dl.position.set(5, 5, 5);
     dl.castShadow = true;
     dl.shadow.camera.near = 0.01;

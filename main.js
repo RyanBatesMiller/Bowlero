@@ -1,6 +1,24 @@
-import { init, getCamera, spawnCube, spawnSphere, getKeyDown, getDeltaTime, Vector3 } from './engine.js';
+//main.js
+import * as THREE from 'three';
+import {
+  init,
+  getCamera,
+  spawnCube,
+  spawnSphere,
+  getKeyDown,
+  getDeltaTime,
+  Vector3,
+  Transform,
+  getScene
+} from './engine.js';
+
 import * as CANNON from 'cannon-es';
 import { ScoreManager } from './ScoreManager.js';
+
+//models
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+
+let pinTemplate = null;    // will hold the loaded Blender pin model
 
 const uiContainer = document.createElement('div');
 Object.assign(uiContainer.style, {
@@ -43,8 +61,6 @@ let hasLaunched = false;
 const scoredPins = new Set();
 const pinOriginalPositions = [];
 
-
-
 // Initialize the physics world
 function createPhysics() {
   world = new CANNON.World();
@@ -83,45 +99,71 @@ function createPhysics() {
   return { pinMaterial, ballMaterial };
 }
 
-// Spawn a single pin at a given position
 function spawnPin(position, pinMaterial) {
-  // Visual: single tall cube for body + small sphere for head
-  const body = spawnCube(
-    Vector3(position.x, 0.75, position.z), // Center the visual at (x, 0.75, z)
-    Vector3(0, 0, 0),
-    Vector3(0.3, 1.5, 0.3),
-    0xFFFFFF
-  );
-  const head = spawnSphere(
-    Vector3(position.x, 1.5, position.z),
-    Vector3(0, 0, 0),
-    Vector3(0.15, 0.15, 0.15),
-    0xFFFFFF
-  );
-  head.setParent(body);
+  if (!pinTemplate) return;
 
-  // Red band
-  const band = spawnCube(
-    Vector3(position.x, 1.1, position.z),
-    Vector3(0, 0, 0),
-    Vector3(0.32, 0.05, 0.32),
-    0xFF0000
+  // — 1) Measure your mesh so the physics matches exactly —
+  pinTemplate.updateMatrixWorld(true);
+  const bbox = new THREE.Box3().setFromObject(pinTemplate);
+  const size = new THREE.Vector3();
+  bbox.getSize(size);
+  const height = size.y;
+  const radius = Math.max(size.x, size.z) / 2;
+  const halfH  = height / 2;
+  const margin = 0.02;  // small gap so it doesn’t intersect floor
 
-  );
-  band.setParent(body);
+  // — 2) Build a compound Cannon body: cylinder + end‐spheres —
+  const body = new CANNON.Body({
+    mass: 1.54,
+    material: pinMaterial,
+    allowSleep: true,
+    sleepSpeedLimit: 0.1,
+    sleepTimeLimit: 1
+  });
 
-  // Physics: single cylinder centered at (x, 0.75, z)
-  const pinBody = new CANNON.Body({ mass: 1.54, material: pinMaterial }); // 3.4 lbs
-  const cyl = new CANNON.Cylinder(0.15, 0.15, 1.5, 16);
-  
-  pinBody.addShape(cyl, new CANNON.Vec3(0, 0, 0)); // No offset, centered at body position
-  pinBody.position.set(position.x, 0.75, position.z); // Set body position to (x, 0.75, z)
-  pinBody.linearDamping = 0.3;
-  world.addBody(pinBody);
+  // 2a) cylinder, rotated so its axis → Y
+  const cyl = new CANNON.Cylinder(radius, radius, height - 2*radius, 16);
+  const q   = new CANNON.Quaternion().setFromEuler(0, 0, Math.PI/2, 'XYZ');
+  body.addShape(cyl, new CANNON.Vec3(0, 0, 0), q);
 
-  pinMeshes.push(body);
-  pinBodies.push(pinBody);
-  pinOriginalPositions.push(pinBody.position.clone());
+  // 2b) sphere at top
+  const sphTop = new CANNON.Sphere(radius);
+  body.addShape(sphTop, new CANNON.Vec3(0, +halfH - radius, 0));
+
+  // 2c) sphere at bottom
+  const sphBot = new CANNON.Sphere(radius);
+  body.addShape(sphBot, new CANNON.Vec3(0, -halfH + radius, 0));
+
+  body.updateMassProperties();
+
+  // — 3) Position & sleep until the ball is launched —
+  body.position.set(position.x,
+                    position.y + halfH + margin,
+                    position.z);
+  body.sleep();
+  world.addBody(body);
+
+  // optional: kill any pure Y‐spin and add damping
+  body.angularFactor.set(1, 0, 1);
+  body.angularDamping  = 0.8;
+  body.linearDamping   = 0.1;
+
+  // — 4) Wrap your visual model + optional debug hull —
+  const wrapper = new THREE.Group();
+  wrapper.position.copy(body.position);
+  wrapper.quaternion.copy(body.quaternion);
+
+  // Your real pin mesh
+  const mesh = pinTemplate.clone(true);
+  mesh.position.set(0, -halfH, 0);
+  wrapper.add(mesh);
+
+  getScene().add(wrapper);
+
+  // — 5) track for sync & scoring —
+  pinBodies.push(body);
+  pinMeshes.push(new Transform(wrapper));
+  pinOriginalPositions.push(body.position.clone());
 }
 
 // Arrange 10 pins in a triangle formation
@@ -147,12 +189,34 @@ function start() {
   const { pinMaterial, ballMaterial } = createPhysics();
 
   // Lane surface
-  spawnCube(
-    Vector3(0, -0.5, -5),
-    Vector3(0, 0, 0),
-    Vector3(5, 0.75, 20),
-    0xfac75a
-  );
+
+  // 1) load the texture
+  const texLoader = new THREE.TextureLoader();
+  const laneTex = texLoader.load('textures/bowling.jpg', tex => {
+  // once loaded, tell it to repeat
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  // tile 4 times along X, 10 times along Y (adjust to taste)
+  tex.repeat.set(4, 10);
+  tex.encoding = THREE.sRGBEncoding;  // optional, for correct colors
+});
+
+  // 2) optionally repeat it
+  laneTex.wrapS = laneTex.wrapT = THREE.RepeatWrapping;
+  laneTex.repeat.set(4, 4);               // adjust to taste
+  laneTex.encoding = THREE.sRGBEncoding;  // if you want correct color
+
+  // 3) make a material & mesh
+  const laneMat = new THREE.MeshPhongMaterial({ map: laneTex });
+  const laneGeo = new THREE.PlaneGeometry( 10, 40 );  // same size as your cube
+  const laneMesh = new THREE.Mesh(laneGeo, laneMat);
+
+  // 4) rotate so it’s flat on the XZ-plane
+  laneMesh.rotation.x = -Math.PI/2;
+  laneMesh.position.set(0, 0, -5);    // match your old cube’s center
+  laneMesh.receiveShadow = true;
+
+  // 5) add to the scene
+  getScene().add(laneMesh);
 
   // Pins
   spawnAllPins(pinMaterial);
@@ -174,7 +238,7 @@ function start() {
   const ballShape = new CANNON.Sphere(0.42);
   ballBody = new CANNON.Body({ mass: 5.9, material: ballMaterial }); // 13 lbs
   ballBody.addShape(ballShape);
-  ballBody.position.set(0, 0.25, 3);
+  ballBody.position.set(0, 0.42, 3);
   ballBody.linearDamping = 0.05;
   world.addBody(ballBody);
 
@@ -199,53 +263,42 @@ function reset() {
 
 // Main loop: physics step, sync meshes, input handling
 function update() {
-
   const dt = getDeltaTime();
-  world.step(1 / 120, dt, 10); // Use fixed time step for better accuracy
+  world.step(1/120, dt, 10);
 
-  // Sync ball mesh
+  // — Ball sync (unchanged) —
   const b = ballBody.position;
-  ballMesh.translateWorld(
-    Vector3(b.x - ballMesh.position().x,
-            b.y - ballMesh.position().y,
-            b.z - ballMesh.position().z)
-  );
+  ballMesh.translateWorld(Vector3(
+    b.x - ballMesh.position().x,
+    b.y - ballMesh.position().y,
+    b.z - ballMesh.position().z
+  ));
 
-  // Sync pin meshes
+  // — Pin sync: copy both position & rotation! —
   for (let i = 0; i < pinBodies.length; i++) {
-    const pb = pinBodies[i].position;
-    const pm = pinMeshes[i];
-    pm.translateWorld(
-      Vector3(pb.x - pm.position().x,
-              pb.y - pm.position().y,
-              pb.z - pm.position().z)
-    );
+    const body    = pinBodies[i];
+    const wrapper = pinMeshes[i].o3d;  // unwrap THREE.Group
+
+    wrapper.position.copy(body.position);
+    wrapper.quaternion.copy(body.quaternion);
   }
 
+  // — Scoring & input (unchanged) —
   pinBodies.forEach((pinBody, idx) => {
     if (scoredPins.has(idx)) return;
-
-    const original = pinOriginalPositions[idx];
-    const current  = pinBody.position;
-
-    const dx = current.x - original.x;
-    const dy = current.y - original.y;
-    const dz = current.z - original.z;
-    const distance = Math.sqrt(dx*dx + dy*dy + dz*dz);
-
-    // if it’s moved more than 0.4 units from spawn
-    if (distance > 0.4) {
+    const orig = pinOriginalPositions[idx];
+    const cur  = pinBody.position;
+    const dist = Math.hypot(
+      cur.x - orig.x,
+      cur.y - orig.y,
+      cur.z - orig.z
+    );
+    if (dist > 0.4) {
       scoredPins.add(idx);
       score.add(1);
       scoreElem.innerText = `Score: ${score.getScore()}`;
     }
   });
-
-  /*
-  if (getKeyDown('r')) {
-    reset();
-  }
-  */
 
   if (getKeyDown('ArrowUp') && !hasLaunched) {
     hasLaunched = true;
@@ -256,7 +309,22 @@ function update() {
   }
 
   camera.lookAt(ballMesh.position());
-  
 }
 
-init(start, update);
+//init called after models loaded in
+new GLTFLoader().load(
+  '/models/pin.glb',
+  (gltf) => {
+    pinTemplate = gltf.scene;
+    pinTemplate.traverse(node => {
+      if (node.isMesh) {
+        node.castShadow    = true;
+        node.receiveShadow = true;
+      }
+    });
+    pinTemplate.scale.set(0.2, 0.2, 0.2);
+    init(start, update);
+  },
+  undefined,
+  (err) => console.error('Failed to load pin model:', err)
+);
