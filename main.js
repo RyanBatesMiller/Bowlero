@@ -12,45 +12,166 @@ import {
   getScene
 } from './engine.js';
 
+//imports
 import * as CANNON from 'cannon-es';
 import { ScoreManager } from './ScoreManager.js';
-
-//models
+import { FontLoader } from 'three/examples/jsm/loaders/FontLoader.js';
+import { TextGeometry } from 'three/examples/jsm/geometries/TextGeometry.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 
-let pinTemplate = null;    // will hold the loaded Blender pin model
+let pinTemplate = null;  
 
-const uiContainer = document.createElement('div');
-Object.assign(uiContainer.style, {
-  position: 'absolute',
-  top: '5%',               // vertically center
-  left: '50%',              // horizontally center
-  transform: 'translate(-50%, -50%)',
-  backgroundColor: 'rgba(30, 30, 30, 0.8)',  // dark semi‑transparent box
-  padding: '16px 24px',
-  borderRadius: '12px',
-  textAlign: 'center',
-  color: '#FF8856',
-  fontFamily: 'Arial, sans-serif',
-  zIndex: 10,
-  pointerEvents: 'none'
+//DOM/CSS
+const fontLink = document.createElement('link');
+fontLink.href = 'https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap';
+fontLink.rel = 'stylesheet';
+document.head.appendChild(fontLink);
+
+const neonCSS = document.createElement('style');
+neonCSS.textContent = `
+#scanlines {
+  position: fixed;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  pointer-events: none;
+  background: repeating-linear-gradient(rgba(0,0,0,0.08) 1px, transparent 2px);
+  mix-blend-mode: multiply;
+  z-index: 999;
+}
+#score-sheet, .frame, .roll, .total, #ui-container h1, #ui-container div {
+  font-family: 'Press Start 2P', sans-serif;
+  color: #ff00ff;
+  text-shadow: 0 0 6px #ff00ff;
+}
+`;
+document.head.appendChild(neonCSS);
+
+const scanOverlay = document.createElement('div');
+scanOverlay.id = 'scanlines';
+document.body.appendChild(scanOverlay);
+
+// scoresheet
+
+function createScoreSheet() {
+  const sheet = document.createElement('div');
+  sheet.id = 'score-sheet';
+  Object.assign(sheet.style, {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(9, 60px) 120px',
+    gap: '0px',
+    position: 'absolute',
+    top: '1%',
+    right: '25%',
+    zIndex: 10,
+    background: 'rgba(0,0,0,0.5)',
+    padding: '8px',
+    borderRadius: '8px'
+  });
+  for (let i = 1; i <= 10; i++) {
+    const frame = document.createElement('div');
+    frame.className = 'frame';
+    frame.dataset.frame = i;
+    Object.assign(frame.style, {
+      border: '2px solid #ff00ff',
+      display: 'flex',
+      flexDirection: 'column',
+      justifyContent: 'space-between',
+      width: i < 10 ? '60px' : '120px',
+      height: '80px',
+      background: '#000'
+    });
+
+    const rolls = document.createElement('div');
+    rolls.className = 'rolls';
+    Object.assign(rolls.style, {
+      display: 'grid',
+      gridTemplateColumns: i < 10 ? '2fr 2fr' : '2fr 2fr 2fr',
+      borderBottom: '2px solid #ff00ff',
+      borderTop: '2px solid #ff00ff',
+      height: '30px'
+    });
+    
+    const rollCount = i < 10 ? 2 : 3;
+    for (let r = 1; r <= rollCount; r++) {
+      const cell = document.createElement('div');
+      cell.className = 'roll';
+      cell.dataset.roll = r;
+      Object.assign(cell.style, {
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontSize: '12px',
+        borderRight: r < rollCount ? '1px solid #ff00ff' : ''
+      });
+      rolls.appendChild(cell);
+    }
+    const total = document.createElement('div');
+    total.className = 'total';
+    total.dataset.total = i;
+    Object.assign(total.style, {
+      height: '25px',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      fontSize: '12px'
+    });
+    frame.append(rolls, total);
+    sheet.appendChild(frame);
+  }
+  document.body.appendChild(sheet);
+
+  
+}
+
+function setRoll(frameNum, rollNum, value) {
+  const cell = document.querySelector(
+    `#score-sheet .frame[data-frame="${frameNum}"] .roll[data-roll="${rollNum}"]`
+  ); if (cell) cell.innerText = value;
+}
+function setTotal(frameNum, value) {
+  const cell = document.querySelector(
+    `#score-sheet .frame[data-frame="${frameNum}"] .total[data-total="${frameNum}"]`
+  ); if (cell) cell.innerText = value;
+}
+createScoreSheet();
+
+document.querySelectorAll('#score-sheet .frame').forEach(frame => {
+  const idx = frame.dataset.frame;
+  const label = document.createElement('div');
+  label.className = 'frame-label';
+  label.innerText = idx;
+  Object.assign(label.style, {
+    fontSize: '10px',
+    color: '#ff00ff',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '15px'
+  });
+  frame.prepend(label);
 });
 
+//Title UI
+
+const uiContainer = document.createElement('div');
+uiContainer.id = 'ui-container';
+Object.assign(uiContainer.style, {
+  position: 'absolute', top: '0%', left: '0%',
+  backgroundColor: 'rgba(0,0,0,0.7)', padding: '16px 24px',
+  borderRadius: '12px', textAlign: 'center', zIndex: 10
+});
 const titleElem = document.createElement('h1');
-titleElem.innerText = 'Bowlero';
-titleElem.style.fontSize = '36px';
-titleElem.style.margin = '0 0 8px 0';
+titleElem.innerText = 'BOWLERO';
+titleElem.style.color = '#ff00ff';
 uiContainer.appendChild(titleElem);
-
-const scoreElem = document.createElement('div');
-scoreElem.innerText = 'Score: ';
-scoreElem.style.fontSize = '28px';
-scoreElem.style.margin = '0';
-uiContainer.appendChild(scoreElem);
-
 document.body.appendChild(uiContainer);
 
-let score = new ScoreManager;
+//Initialize globals
+
+const score = new ScoreManager();
+let currentFrame = 1;
+let currentRoll = 1;
+let pinsThisRoll = 0;
 let world;
 let ballBody;
 let ballMesh;
@@ -60,6 +181,9 @@ let camera;
 let hasLaunched = false;
 const scoredPins = new Set();
 const pinOriginalPositions = [];
+let launchTime = null;
+let autoResetPending = false;
+let gameOver = false;
 
 // Initialize the physics world
 function createPhysics() {
@@ -244,25 +368,84 @@ function start() {
 
   hasLaunched = false;
 
+  pinsThisRoll = 0;
+  
 }
 
-function reset() {
-  for (const body of world.bodies) {
-    if (body.mass > 0) {
-      world.removeBody(body);
-    }
+function recordKnock() { pinsThisRoll++; }
+function commitRoll() {
+  score.roll(pinsThisRoll);
+
+  // Strike formatting
+  if (pinsThisRoll === 10 && currentRoll === 1) {
+    setRoll(currentFrame, currentRoll, 'X');
+  } else if (currentRoll === 2 && score.rolls[score.rolls.length - 2] + pinsThisRoll === 10) {
+    // Spare formatting
+    setRoll(currentFrame, currentRoll, '/');
+  } else {
+    setRoll(currentFrame, currentRoll, pinsThisRoll);
   }
-  world.removeBody(ballBody);
-  ballBody = null;
-  ballMesh = null;
-  pinBodies.length = 0; 
-  scoredPins.clear();
-  start();
+
+ const frameScores = score.getFrameScores();
+  let cumulative = 0;
+
+  frameScores.forEach((score, i) => {
+    if (score == null) {
+      setTotal(i + 1, '—');
+    } else {
+      cumulative += score;
+      setTotal(i + 1, cumulative);
+    }
+  });
+
+  // Frame progression logic
+  if (currentFrame < 10) {
+  // normal rules
+  if (pinsThisRoll === 10 && currentRoll === 1) {
+    setRoll(currentFrame, 1, 'X');
+    currentFrame++;
+    currentRoll = 1;
+  } else if (currentRoll === 1) {
+    currentRoll = 2;
+  } else {
+    if (score.rolls[score.rolls.length - 2] + pinsThisRoll === 10) {
+      setRoll(currentFrame, 2, '/');
+    } else {
+      setRoll(currentFrame, 2, pinsThisRoll);
+    }
+    currentFrame++;
+    currentRoll = 1;
+  }
+} else {
+  // 10th frame logic
+  setRoll(currentFrame, currentRoll, pinsThisRoll === 10 ? 'X' : pinsThisRoll);
+
+  // allow up to 3 rolls
+  if (currentRoll === 1) {
+    currentRoll = 2;
+  } else if (currentRoll === 2) {
+    const lastTwo = score.rolls.slice(-2);
+    if (lastTwo[0] === 10 || lastTwo[0] + lastTwo[1] === 10) {
+      currentRoll = 3;
+    } else {
+      currentFrame++; 
+      gameOver = true; // end of game
+    }
+  } else {
+    currentFrame++; 
+    gameOver = true; // end of game
+  }
 }
 
+  pinsThisRoll = 0;
+}
+
+
+let rollCommitted = false;
 
 // Main loop: physics step, sync meshes, input handling
 function update() {
+  if (gameOver) return;
   const dt = getDeltaTime();
   world.step(1/120, dt, 10);
 
@@ -284,21 +467,29 @@ function update() {
   }
 
   // — Scoring & input (unchanged) —
-  pinBodies.forEach((pinBody, idx) => {
-    if (scoredPins.has(idx)) return;
-    const orig = pinOriginalPositions[idx];
-    const cur  = pinBody.position;
-    const dist = Math.hypot(
-      cur.x - orig.x,
-      cur.y - orig.y,
-      cur.z - orig.z
-    );
-    if (dist > 0.4) {
-      scoredPins.add(idx);
-      score.add(1);
-      scoreElem.innerText = `Score: ${score.getScore()}`;
+  pinBodies.forEach((b,i) => {
+    if (!scoredPins.has(i) && b.position.distanceTo(pinOriginalPositions[i])>0.2) {
+      scoredPins.add(i); recordKnock();
     }
   });
+
+  if (hasLaunched && !rollCommitted) {
+    const now = performance.now();
+
+    // Record launch time once
+    if (launchTime === null) {
+      launchTime = now;
+    }
+
+    // Wait 1.5 seconds after launch to commit roll and reset
+    if (now - launchTime >= 1500) {
+      rollCommitted = true;
+      commitRoll();
+      launchTime = null; // reset for next turn
+      hasLaunched = false;
+      resetForNextRoll();
+    }
+  }
 
   if (getKeyDown('ArrowUp') && !hasLaunched) {
     hasLaunched = true;
@@ -328,3 +519,35 @@ new GLTFLoader().load(
   undefined,
   (err) => console.error('Failed to load pin model:', err)
 );
+
+function resetForNextRoll() {
+    // Reset ball
+  ballBody.velocity.setZero();
+  ballBody.angularVelocity.setZero();
+  ballBody.position.set(0, 0.42, 3);
+  ballBody.quaternion.set(0, 0, 0, 1);
+  ballMesh.setPosition(Vector3(0, 0.25, 3));
+  ballMesh.setRotation(Vector3(0, 0, 0));
+
+  // Reset pins
+  for (let i = 0; i < pinBodies.length; i++) {
+    const body = pinBodies[i];
+    const mesh = pinMeshes[i].o3d;
+
+    body.velocity.setZero();
+    body.angularVelocity.setZero();
+    body.position.copy(pinOriginalPositions[i]);
+    body.quaternion.set(0, 0, 0, 1);
+    mesh.position.copy(pinOriginalPositions[i]);
+    mesh.quaternion.set(0, 0, 0, 1);
+    body.sleep();
+  }
+
+  // Reset launch state
+  hasLaunched = false;
+  rollCommitted = false;
+  pinsThisRoll = 0;
+  scoredPins.clear();
+  stillTimer = 0;
+  autoResetPending = false;
+}
