@@ -216,71 +216,8 @@ export function init(startCallback, updateCallback) {
     }
   );
 
-  // ========================================================================
-  // <--- BOWLING LANE WITH PROPER DIMENSIONS --->
-  // Real bowling lane: 42 inches (3.5 feet) wide × 60 feet long
-  // Converting to meters: 1.067m wide × 18.29m long
-  // We'll use slightly larger for visual padding and approach area
-  // ========================================================================
-  const floorLoader = new THREE.TextureLoader();
-  floorLoader.setPath('/textures/');
 
-  floorLoader.load(
-    'hardwood-alley-flooring.jpg',
-    (texture) => {
-      // Real bowling lane dimensions in meters
-      const REAL_LANE_WIDTH = 1.067;  // 42 inches = 3.5 feet = 1.067m
-      const REAL_LANE_LENGTH = 18.29; // 60 feet = 18.29m
-      
-      // Add some extra length for approach area (15 feet = 4.57m)
-      const APPROACH_LENGTH = 4.57;
-      const TOTAL_LENGTH = REAL_LANE_LENGTH + APPROACH_LENGTH; // ~22.86m total
 
-      // Configure texture to look like real hardwood planks
-      texture.wrapS = THREE.RepeatWrapping; // U axis → X (across width)
-      texture.wrapT = THREE.RepeatWrapping; // V axis → Z (down length)
-
-      // Hardwood planks typically run lengthwise down the lane
-      // Set repeats so planks look realistic:
-      // - Across width: ~3-4 planks (each plank ~4-5 inches wide)
-      // - Down length: many planks (each plank ~3-4 feet long)
-      texture.repeat.set(3, Math.floor(TOTAL_LENGTH / 1.2)); // ~19 planks lengthwise
-
-      texture.encoding = THREE.sRGBEncoding;
-
-      // Create the lane geometry with real dimensions
-      const laneGeo = new THREE.PlaneGeometry(REAL_LANE_WIDTH, TOTAL_LENGTH);
-      const laneMat = new THREE.MeshStandardMaterial({ 
-        map: texture,
-        transparent: false
-      });
-      const laneMesh = new THREE.Mesh(laneGeo, laneMat);
-
-      // Rotate to lie flat on XZ plane
-      laneMesh.rotation.x = -Math.PI / 2;
-
-      // Position the lane:
-      // - Center it at X = 0 (lane width centered)
-      // - Place at Y = 0 (floor level)
-      // - Position Z so pins are at proper distance from foul line
-      const FOUL_LINE_Z = APPROACH_LENGTH; // Foul line position
-      const PIN_DISTANCE_FROM_FOUL = 18.29; // 60 feet
-      const PIN_AREA_Z = FOUL_LINE_Z - PIN_DISTANCE_FROM_FOUL;
-      
-      // Center the lane so pin area is at the right position
-      laneMesh.position.set(0, 0, (APPROACH_LENGTH - REAL_LANE_LENGTH) / 2);
-
-      laneMesh.receiveShadow = true;
-      scene.add(laneMesh);
-
-      console.log(`Lane created: ${REAL_LANE_WIDTH}m × ${TOTAL_LENGTH}m`);
-      console.log(`Foul line at Z = ${FOUL_LINE_Z}, Pins at Z = ${PIN_AREA_Z}`);
-    },
-    undefined,
-    (err) => {
-      console.error('Failed to load floor texture:', err);
-    }
-  );
 
   // 2) Create the Camera
   camera = new THREE.PerspectiveCamera(
