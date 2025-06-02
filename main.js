@@ -234,7 +234,7 @@ function spawnPin(position, pinMaterial) {
   const height = size.y;
   const radius = Math.max(size.x, size.z) / 2;
   const halfH  = height / 2;
-  const margin = 0.02;  // small gap so it doesn’t intersect floor
+  const margin = 0.02;  // small gap so it doesn't intersect floor
 
   // — 2) Build a compound Cannon body: cylinder + end‐spheres —
   const body = new CANNON.Body({
@@ -293,7 +293,7 @@ function spawnPin(position, pinMaterial) {
 // Arrange 10 pins in a triangle formation
 function spawnAllPins(pinMaterial) {
   const rows = [1, 2, 3, 4]; // apex to base
-  const startZ = -4;          // apex row position
+  const startZ = -12;         // pins at far end of 60ft lane
   const rowSpacing = 1.2;     // spacing between rows
   const xSpacing = 1.2;       // spacing between pins
 
@@ -302,7 +302,7 @@ function spawnAllPins(pinMaterial) {
     const offset = ((count - 1) * xSpacing) / 2;
     for (let i = 0; i < count; i++) {
       const x = (i * xSpacing) - offset;
-      spawnPin(Vector3(x, 0, z), pinMaterial); // Pass position with y=0, adjusted in spawnPin
+      spawnPin(Vector3(x, 0, z), pinMaterial);
     }
   });
 }
@@ -312,57 +312,47 @@ function start() {
 
   const { pinMaterial, ballMaterial } = createPhysics();
 
-  // Lane surface
-
-  // 1) load the texture
+  // Lane surface - realistic bowling lane dimensions
   const texLoader = new THREE.TextureLoader();
   const laneTex = texLoader.load('textures/bowling.jpg', tex => {
-  // once loaded, tell it to repeat
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  // tile 4 times along X, 10 times along Y (adjust to taste)
-  tex.repeat.set(4, 10);
-  tex.encoding = THREE.sRGBEncoding;  // optional, for correct colors
-});
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    // Adjust texture tiling for realistic proportions
+    tex.repeat.set(1, 15); // 1 tile across width, 15 tiles along length
+    tex.encoding = THREE.sRGBEncoding;
+  });
 
-  // 2) optionally repeat it
-  laneTex.wrapS = laneTex.wrapT = THREE.RepeatWrapping;
-  laneTex.repeat.set(4, 4);               // adjust to taste
-  laneTex.encoding = THREE.sRGBEncoding;  // if you want correct color
-
-  // 3) make a material & mesh
   const laneMat = new THREE.MeshPhongMaterial({ map: laneTex });
-  const laneGeo = new THREE.PlaneGeometry( 10, 40 );  // same size as your cube
+  // Standard bowling lane: ~3.5ft wide, ~60ft long (scaled appropriately)
+  const laneGeo = new THREE.PlaneGeometry(3.5, 60);
   const laneMesh = new THREE.Mesh(laneGeo, laneMat);
 
-  // 4) rotate so it’s flat on the XZ-plane
   laneMesh.rotation.x = -Math.PI/2;
-  laneMesh.position.set(0, 0, -5);    // match your old cube’s center
+  laneMesh.position.set(0, 0, -15); // Center the lane properly
   laneMesh.receiveShadow = true;
 
-  // 5) add to the scene
   getScene().add(laneMesh);
 
   // Pins
   spawnAllPins(pinMaterial);
 
-  // Camera
+  // Camera - adjusted for longer lane
   camera = getCamera();
-  camera.setPosition(Vector3(0, 3, 7));
+  camera.setPosition(Vector3(0, 3, 20));
   camera.setRotation(Vector3(0, 0, 0));
 
-  // Ball mesh
+  // Ball mesh - start position adjusted
   ballMesh = spawnSphere(
-    Vector3(0, 0.25, 3),
+    Vector3(0, 0.25, 15),
     Vector3(0, 0, 0),
     Vector3(0.42, 0.42, 0.42),
     0x7777FF
   );
 
-  // Ball physics body
+  // Ball physics body - start position adjusted
   const ballShape = new CANNON.Sphere(0.42);
   ballBody = new CANNON.Body({ mass: 5.9, material: ballMaterial }); // 13 lbs
   ballBody.addShape(ballShape);
-  ballBody.position.set(0, 0.42, 3);
+  ballBody.position.set(0, 0.42, 15);
   ballBody.linearDamping = 0.05;
   world.addBody(ballBody);
 
@@ -481,8 +471,8 @@ function update() {
       launchTime = now;
     }
 
-    // Wait 1.5 seconds after launch to commit roll and reset
-    if (now - launchTime >= 1500) {
+    // Wait 3 seconds after launch for longer lane
+    if (now - launchTime >= 3000) {
       rollCommitted = true;
       commitRoll();
       launchTime = null; // reset for next turn
@@ -494,7 +484,7 @@ function update() {
   if (getKeyDown('ArrowUp') && !hasLaunched) {
     hasLaunched = true;
     ballBody.applyLocalImpulse(
-      new CANNON.Vec3(0, 0, -150),
+      new CANNON.Vec3(0, 0, -200), // Increased force for longer lane
       new CANNON.Vec3(0, 0, 0)
     );
   }
@@ -521,12 +511,12 @@ new GLTFLoader().load(
 );
 
 function resetForNextRoll() {
-    // Reset ball
+  // Reset ball to starting position
   ballBody.velocity.setZero();
   ballBody.angularVelocity.setZero();
-  ballBody.position.set(0, 0.42, 3);
+  ballBody.position.set(0, 0.42, 15);
   ballBody.quaternion.set(0, 0, 0, 1);
-  ballMesh.setPosition(Vector3(0, 0.25, 3));
+  ballMesh.setPosition(Vector3(0, 0.25, 15));
   ballMesh.setRotation(Vector3(0, 0, 0));
 
   // Reset pins
@@ -548,6 +538,5 @@ function resetForNextRoll() {
   rollCommitted = false;
   pinsThisRoll = 0;
   scoredPins.clear();
-  stillTimer = 0;
   autoResetPending = false;
 }
