@@ -234,7 +234,7 @@ function spawnPin(position, pinMaterial) {
   const height = size.y;
   const radius = Math.max(size.x, size.z) / 2;
   const halfH  = height / 2;
-  const margin = 0.02;  // small gap so it doesn't intersect floor
+  const margin = 0.2;  // small gap so it doesn't intersect floor
 
   // — 2) Build a compound Cannon body: cylinder + end‐spheres —
   const body = new CANNON.Body({
@@ -322,8 +322,8 @@ function start() {
   });
 
   const laneMat = new THREE.MeshPhongMaterial({ map: laneTex });
-  // Standard bowling lane: ~3.5ft wide, ~60ft long (scaled appropriately)
-  const laneGeo = new THREE.PlaneGeometry(3.5, 60);
+  // Standard bowling lane (scaled appropriately)
+  const laneGeo = new THREE.PlaneGeometry(4.7, 60);
   const laneMesh = new THREE.Mesh(laneGeo, laneMat);
 
   laneMesh.rotation.x = -Math.PI/2;
