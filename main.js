@@ -166,6 +166,32 @@ titleElem.style.color = '#ff00ff';
 uiContainer.appendChild(titleElem);
 document.body.appendChild(uiContainer);
 
+// Add instructions UI
+const instructions = document.createElement('div');
+instructions.id = 'instructions';
+Object.assign(instructions.style, {
+  position: 'absolute',
+  bottom: '2%',
+  left: '50%',
+  transform: 'translateX(-50%)',
+  background: 'rgba(0,0,0,0.85)',
+  color: '#fff',
+  fontFamily: "'Press Start 2P', sans-serif",
+  fontSize: '14px',
+  padding: '12px 24px',
+  borderRadius: '10px',
+  border: '2px solid #ff00ff',
+  zIndex: 1001,
+  textAlign: 'center',
+  textShadow: '0 0 6px #ff00ff'
+});
+instructions.innerHTML = `
+  <b>How to Play:</b><br>
+  <span style="color:#ff00ff;">Click and drag <u>backwards</u> from the bowling ball to aim and set power.<br>
+  Release to throw!</span>
+`;
+document.body.appendChild(instructions);
+
 //Initialize globals
 
 const score = new ScoreManager();
@@ -360,6 +386,8 @@ function start() {
 
   pinsThisRoll = 0;
   
+  // Wait for renderer to be available before attaching listeners
+  setTimeout(attachMouseListeners, 0);
 }
 
 function recordKnock() { pinsThisRoll++; }
@@ -481,15 +509,10 @@ function update() {
     }
   }
 
-  if (getKeyDown('ArrowUp') && !hasLaunched) {
-    hasLaunched = true;
-    ballBody.applyLocalImpulse(
-      new CANNON.Vec3(0, 0, -200), // Increased force for longer lane
-      new CANNON.Vec3(0, 0, 0)
-    );
-  }
-
   camera.lookAt(ballMesh.position());
+
+  // Update arrow if visible and dragging
+  if (arrowVisible && mouseDown) updateArrow();
 }
 
 //init called after models loaded in
@@ -539,4 +562,184 @@ function resetForNextRoll() {
   pinsThisRoll = 0;
   scoredPins.clear();
   autoResetPending = false;
+}
+
+// mouse control variables
+let mouseDown = false;
+let dragStart = null;
+let dragEnd = null;
+let arrowHelper = null;
+let arrowVisible = false;
+
+// Utility: convert screen coords to world coords at a given y-plane
+function screenToWorld(x, y, yPlane = 0.25) {
+  if (!window.renderer) {
+    console.warn('renderer not ready for screenToWorld');
+    return new THREE.Vector3(0, yPlane, 0);
+  }
+  const rect = window.renderer.domElement.getBoundingClientRect();
+  const ndc = new THREE.Vector2(
+    ((x - rect.left) / rect.width) * 2 - 1,
+    -((y - rect.top) / rect.height) * 2 + 1
+  );
+  const cameraObj = getCamera().o3d;
+  const raycaster = new THREE.Raycaster();
+  raycaster.setFromCamera(ndc, cameraObj);
+  const dir = raycaster.ray.direction;
+  const origin = raycaster.ray.origin;
+  // Intersect with y = yPlane
+  const t = (yPlane - origin.y) / dir.y;
+  const worldPos = origin.clone().add(dir.clone().multiplyScalar(t));
+  console.log('[screenToWorld] Screen:', x, y, '-> World:', worldPos);
+  return worldPos;
+}
+
+// Mouse event handlers
+function onMouseDown(e) {
+  if (hasLaunched || gameOver) {
+    console.log('[onMouseDown] Ignored: hasLaunched or gameOver');
+    return;
+  }
+  mouseDown = true;
+  dragStart = screenToWorld(e.clientX, e.clientY);
+  dragEnd = dragStart.clone();
+  showArrow();
+  console.log('[onMouseDown] Drag started at', dragStart);
+}
+
+function onMouseMove(e) {
+  if (!mouseDown) return;
+  dragEnd = screenToWorld(e.clientX, e.clientY);
+  updateArrow();
+  // Debug: show drag vector
+  if (dragStart && dragEnd) {
+    const dragVec = new THREE.Vector3().subVectors(dragStart, dragEnd);
+    console.log('[onMouseMove] Drag vector:', dragVec);
+  }
+}
+
+function onMouseUp(e) {
+  if (!mouseDown) return;
+  mouseDown = false;
+  hideArrow();
+  if (hasLaunched || gameOver) {
+    console.log('[onMouseUp] Ignored: hasLaunched or gameOver');
+    return;
+  }
+  // Calculate launch vector
+  const from = dragStart;
+  const to = dragEnd;
+  const dragVec = new THREE.Vector3().subVectors(from, to);
+  console.log('[onMouseUp] Drag vector:', dragVec);
+  // Only allow forward throws (negative z)
+  if (dragVec.length() < 0.2 || dragVec.z >= 0) {
+    console.log('[onMouseUp] Drag too short or not forward, ignoring throw.');
+    return;
+  }
+  // Clamp force and angle
+  const maxForce = 250;
+  const minForce = 50;
+  let force = THREE.MathUtils.clamp(dragVec.length() * 80, minForce, maxForce);
+  let dir = dragVec.clone().normalize();
+  // Only allow small angles left/right
+  dir.y = 0;
+  dir.normalize();
+  // Apply impulse
+  hasLaunched = true;
+  ballBody.velocity.setZero();
+  ballBody.angularVelocity.setZero();
+  ballBody.applyImpulse(
+    new CANNON.Vec3(dir.x * force, 0, dir.z * force),
+    new CANNON.Vec3(0, 0, 0)
+  );
+  console.log('[onMouseUp] Ball launched! Direction:', dir, 'Force:', force);
+}
+
+function showArrow() {
+  if (arrowHelper) {
+    getScene().remove(arrowHelper);
+    arrowHelper = null;
+  }
+  const ballPos = ballMesh.position();
+  arrowHelper = new THREE.ArrowHelper(
+    new THREE.Vector3(0, 0, -1),
+    new THREE.Vector3(ballPos.x, ballPos.y, ballPos.z + 0.01), // offset to avoid z-fighting
+    1.5,
+    0xffff00,
+    0.7,
+    0.4
+  );
+  getScene().add(arrowHelper);
+  arrowVisible = true;
+  arrowHelper.visible = true;
+  console.log('[showArrow] Arrow shown at', ballPos);
+}
+
+function updateArrow() {
+  if (!arrowHelper || !dragStart || !dragEnd) return;
+  const from = dragStart;
+  const to = dragEnd;
+  const dragVec = new THREE.Vector3().subVectors(from, to);
+  if (dragVec.length() < 0.05) {
+    arrowHelper.visible = false;
+    return;
+  }
+  // Only show forward throws
+  if (dragVec.z >= 0) {
+    arrowHelper.visible = false;
+    return;
+  }
+  arrowHelper.visible = true;
+  const ballPos = ballMesh.position();
+  arrowHelper.position.copy(ballPos);
+  const dir = dragVec.clone().normalize();
+  dir.y = 0;
+  dir.normalize();
+  arrowHelper.setDirection(dir);
+  // Clamp arrow length
+  let len = THREE.MathUtils.clamp(dragVec.length(), 0.7, 4.0);
+  arrowHelper.setLength(len, 0.7, 0.4);
+  // Debug
+  console.log('[updateArrow] Arrow dir:', dir, 'len:', len);
+}
+
+function hideArrow() {
+  if (arrowHelper) {
+    getScene().remove(arrowHelper);
+    arrowHelper = null;
+    console.log('[hideArrow] Arrow hidden');
+  }
+  arrowVisible = false;
+}
+
+// Attach mouse listeners after renderer is created
+let renderer = null; // will be set in start()
+function attachMouseListeners() {
+  if (!window.renderer) {
+    setTimeout(attachMouseListeners, 50);
+    return;
+  }
+  renderer = window.renderer;
+  renderer.domElement.addEventListener('mousedown', onMouseDown);
+  renderer.domElement.addEventListener('mousemove', onMouseMove);
+  renderer.domElement.addEventListener('mouseup', onMouseUp);
+  renderer.domElement.addEventListener('mouseleave', onMouseUp);
+  // Touch support for mobile
+  renderer.domElement.addEventListener('touchstart', e => {
+    if (e.touches.length === 1) {
+      onMouseDown(e.touches[0]);
+      e.preventDefault();
+    }
+  });
+  renderer.domElement.addEventListener('touchmove', e => {
+    if (e.touches.length === 1) {
+      onMouseMove(e.touches[0]);
+      e.preventDefault();
+    }
+  });
+  renderer.domElement.addEventListener('touchend', e => {
+    onMouseUp(e.changedTouches[0]);
+    e.preventDefault();
+  });
+  console.log('[attachMouseListeners] Mouse listeners attached');
 }

@@ -238,6 +238,9 @@ export function init(startCallback, updateCallback) {
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   document.body.appendChild(renderer.domElement);
 
+  // Expose renderer for mouse picking in main.js
+  window.renderer = renderer;
+
   // 4) Lighting - improved for better lane visibility
   const ambient = new THREE.AmbientLight(0xffffff, 0.6);
   scene.add(ambient);
