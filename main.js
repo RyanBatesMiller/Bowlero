@@ -404,9 +404,11 @@ function commitRoll() {
   // Strike formatting
   if (pinsThisRoll === 10 && currentRoll === 1) {
     setRoll(currentFrame, currentRoll, 'X');
+    showFxMessage('STRIKE!');
   } else if (currentRoll === 2 && score.rolls[score.rolls.length - 2] + pinsThisRoll === 10) {
     // Spare formatting
     setRoll(currentFrame, currentRoll, '/');
+    showFxMessage('SPARE!');
   } else {
     setRoll(currentFrame, currentRoll, pinsThisRoll);
   }
@@ -769,4 +771,36 @@ function attachMouseListeners() {
     e.preventDefault();
   });
   console.log('[attachMouseListeners] Mouse listeners attached');
+}
+
+// Add strike/spare message UI (centered, with black background)
+const fxMessage = document.createElement('div');
+fxMessage.id = 'fx-message';
+Object.assign(fxMessage.style, {
+  position: 'fixed',
+  top: '50%',
+  left: '50%',
+  transform: 'translate(-50%, -50%)',
+  fontFamily: "'Press Start 2P', sans-serif",
+  color: '#ff00ff',
+  fontSize: '64px',
+  textShadow: '0 0 16px #ff00ff, 0 0 32px #ff00ff',
+  zIndex: 1002,
+  pointerEvents: 'none',
+  opacity: 0,
+  transition: 'opacity 0.3s',
+  background: 'rgba(0,0,0,0.85)',
+  padding: '32px 64px',
+  borderRadius: '18px',
+  border: '2px solid #ff00ff',
+  boxSizing: 'border-box'
+});
+document.body.appendChild(fxMessage);
+
+function showFxMessage(text) {
+  fxMessage.innerText = text;
+  fxMessage.style.opacity = 1;
+  setTimeout(() => {
+    fxMessage.style.opacity = 0;
+  }, 1200);
 }
