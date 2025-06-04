@@ -210,12 +210,13 @@ const pinOriginalPositions = [];
 let launchTime = null;
 let autoResetPending = false;
 let gameOver = false;
+const standingPins = []; // Track which pins are standing (true = standing, false = knocked down)
 
 // Initialize the physics world
 function createPhysics() {
   world = new CANNON.World();
   world.gravity.set(0, -9.82, 0);
-  world.solver.iterations = 20; // Increase solver iterations for better accuracy
+  world.solver.iterations = 40; // Even more stability
 
   // Define materials
   const groundMaterial = new CANNON.Material('ground');
@@ -228,22 +229,22 @@ function createPhysics() {
   groundBody.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
   world.addBody(groundBody);
 
-  // Contact materials
+  // Contact materials (much less bounce, more friction)
   world.addContactMaterial(new CANNON.ContactMaterial(groundMaterial, pinMaterial, {
-    friction: 0.8,    // High friction to keep pins stable
-    restitution: 0.1  // Low restitution to prevent bouncing
+    friction: 0.7,    // High friction for pin stability
+    restitution: 0.01 // Very low bounce
   }));
   world.addContactMaterial(new CANNON.ContactMaterial(ballMaterial, pinMaterial, {
-    friction: 0.2,    // Moderate friction for ball-pin interaction
-    restitution: 0.1  // Lower restitution to reduce ball bouncing off pins
+    friction: 0.22,   // Slightly more friction
+    restitution: 0.01 // Very low bounce
   }));
   world.addContactMaterial(new CANNON.ContactMaterial(pinMaterial, pinMaterial, {
-    friction: 0.5,    // Adjusted for realistic pin-to-pin sliding
-    restitution: 0.2  // Slightly increased for pin-to-pin collisions
+    friction: 0.35,   // More friction between pins
+    restitution: 0.02 // Very low bounce
   }));
   world.addContactMaterial(new CANNON.ContactMaterial(ballMaterial, groundMaterial, {
-    friction: 0.05,   // Low friction for slippery lane
-    restitution: 0.0  // No bouncing off the ground
+    friction: 0.04,   // Lane is slick
+    restitution: 0.0
   }));
 
   return { pinMaterial, ballMaterial };
@@ -264,7 +265,7 @@ function spawnPin(position, pinMaterial) {
 
   // — 2) Build a compound Cannon body: cylinder + end‐spheres —
   const body = new CANNON.Body({
-    mass: 1.54,
+    mass: 3.8, // 2.5x real pin mass (kg) for much harder knockdown
     material: pinMaterial,
     allowSleep: true,
     sleepSpeedLimit: 0.1,
@@ -314,6 +315,7 @@ function spawnPin(position, pinMaterial) {
   pinBodies.push(body);
   pinMeshes.push(new Transform(wrapper));
   pinOriginalPositions.push(body.position.clone());
+  standingPins.push(true); // All pins start standing
 }
 
 // Arrange 10 pins in a triangle formation
@@ -376,10 +378,10 @@ function start() {
 
   // Ball physics body - start position adjusted
   const ballShape = new CANNON.Sphere(0.42);
-  ballBody = new CANNON.Body({ mass: 5.9, material: ballMaterial }); // 13 lbs
+  ballBody = new CANNON.Body({ mass: 6.35, material: ballMaterial }); // 14 lbs (6.35 kg)
   ballBody.addShape(ballShape);
   ballBody.position.set(0, 0.42, 15);
-  ballBody.linearDamping = 0.05;
+  ballBody.linearDamping = 0.12; // More damping for less energy transfer
   world.addBody(ballBody);
 
   hasLaunched = false;
@@ -390,7 +392,12 @@ function start() {
   setTimeout(attachMouseListeners, 0);
 }
 
-function recordKnock() { pinsThisRoll++; }
+function recordKnock(pinIdx) {
+  pinsThisRoll++;
+  standingPins[pinIdx] = false;
+  // Do NOT hide the pin mesh here; hide after roll is committed
+  // pinMeshes[pinIdx].o3d.visible = false;
+}
 function commitRoll() {
   score.roll(pinsThisRoll);
 
@@ -418,42 +425,46 @@ function commitRoll() {
 
   // Frame progression logic
   if (currentFrame < 10) {
-  // normal rules
-  if (pinsThisRoll === 10 && currentRoll === 1) {
-    setRoll(currentFrame, 1, 'X');
-    currentFrame++;
-    currentRoll = 1;
-  } else if (currentRoll === 1) {
-    currentRoll = 2;
-  } else {
-    if (score.rolls[score.rolls.length - 2] + pinsThisRoll === 10) {
-      setRoll(currentFrame, 2, '/');
+    if (pinsThisRoll === 10 && currentRoll === 1) {
+      // Strike: next frame, reset all pins
+      setRoll(currentFrame, 1, 'X');
+      currentFrame++;
+      currentRoll = 1;
+      resetPinsForNewFrame();
+    } else if (currentRoll === 1) {
+      // First roll, not a strike: prepare for second roll, do NOT reset pins
+      currentRoll = 2;
     } else {
-      setRoll(currentFrame, 2, pinsThisRoll);
+      // Second roll: next frame, reset all pins
+      if (score.rolls[score.rolls.length - 2] + pinsThisRoll === 10) {
+        setRoll(currentFrame, 2, '/');
+      } else {
+        setRoll(currentFrame, 2, pinsThisRoll);
+      }
+      currentFrame++;
+      currentRoll = 1;
+      resetPinsForNewFrame();
     }
-    currentFrame++;
-    currentRoll = 1;
-  }
-} else {
-  // 10th frame logic
-  setRoll(currentFrame, currentRoll, pinsThisRoll === 10 ? 'X' : pinsThisRoll);
-
-  // allow up to 3 rolls
-  if (currentRoll === 1) {
-    currentRoll = 2;
-  } else if (currentRoll === 2) {
-    const lastTwo = score.rolls.slice(-2);
-    if (lastTwo[0] === 10 || lastTwo[0] + lastTwo[1] === 10) {
-      currentRoll = 3;
+  } else {
+    // 10th frame logic (leave as-is for now)
+    setRoll(currentFrame, currentRoll, pinsThisRoll === 10 ? 'X' : pinsThisRoll);
+    if (currentRoll === 1) {
+      currentRoll = 2;
+    } else if (currentRoll === 2) {
+      const lastTwo = score.rolls.slice(-2);
+      if (lastTwo[0] === 10 || lastTwo[0] + lastTwo[1] === 10) {
+        currentRoll = 3;
+      } else {
+        currentFrame++; 
+        gameOver = true;
+      }
     } else {
       currentFrame++; 
-      gameOver = true; // end of game
+      gameOver = true;
     }
-  } else {
-    currentFrame++; 
-    gameOver = true; // end of game
+    // For 10th frame, always reset all pins for each roll
+    resetPinsForNewFrame();
   }
-}
 
   pinsThisRoll = 0;
 }
@@ -478,18 +489,21 @@ function update() {
   // — Pin sync: copy both position & rotation! —
   for (let i = 0; i < pinBodies.length; i++) {
     const body    = pinBodies[i];
-    const wrapper = pinMeshes[i].o3d;  // unwrap THREE.Group
-
+    const wrapper = pinMeshes[i].o3d;
     wrapper.position.copy(body.position);
     wrapper.quaternion.copy(body.quaternion);
   }
 
-  // — Scoring & input (unchanged) —
-  pinBodies.forEach((b,i) => {
-    if (!scoredPins.has(i) && b.position.distanceTo(pinOriginalPositions[i])>0.2) {
-      scoredPins.add(i); recordKnock();
+  // — Scoring & input (track only pins knocked down this roll) —
+  for (let i = 0; i < pinBodies.length; i++) {
+    if (!scoredPins.has(i) && standingPins[i]) {
+      const b = pinBodies[i];
+      if (b.position.distanceTo(pinOriginalPositions[i]) > 0.2) {
+        scoredPins.add(i);
+        recordKnock(i);
+      }
     }
-  });
+  }
 
   if (hasLaunched && !rollCommitted) {
     const now = performance.now();
@@ -533,6 +547,23 @@ new GLTFLoader().load(
   (err) => console.error('Failed to load pin model:', err)
 );
 
+function resetPinsForNewFrame() {
+  for (let i = 0; i < pinBodies.length; i++) {
+    const body = pinBodies[i];
+    const mesh = pinMeshes[i].o3d;
+    body.velocity.setZero();
+    body.angularVelocity.setZero();
+    body.position.copy(pinOriginalPositions[i]);
+    body.quaternion.set(0, 0, 0, 1);
+    mesh.position.copy(pinOriginalPositions[i]);
+    mesh.quaternion.set(0, 0, 0, 1);
+    body.sleep();
+    standingPins[i] = true;
+    mesh.visible = true;
+  }
+  scoredPins.clear();
+}
+
 function resetForNextRoll() {
   // Reset ball to starting position
   ballBody.velocity.setZero();
@@ -542,18 +573,14 @@ function resetForNextRoll() {
   ballMesh.setPosition(Vector3(0, 0.25, 15));
   ballMesh.setRotation(Vector3(0, 0, 0));
 
-  // Reset pins
-  for (let i = 0; i < pinBodies.length; i++) {
-    const body = pinBodies[i];
-    const mesh = pinMeshes[i].o3d;
-
-    body.velocity.setZero();
-    body.angularVelocity.setZero();
-    body.position.copy(pinOriginalPositions[i]);
-    body.quaternion.set(0, 0, 0, 1);
-    mesh.position.copy(pinOriginalPositions[i]);
-    mesh.quaternion.set(0, 0, 0, 1);
-    body.sleep();
+  // Hide knocked-down pins ONLY if it's the second roll of a frame (not after strike/new frame)
+  // If currentRoll === 2, we just finished the first roll and are about to do the second roll
+  if (currentRoll === 2 && currentFrame <= 10) {
+    for (let i = 0; i < standingPins.length; i++) {
+      if (!standingPins[i]) {
+        pinMeshes[i].o3d.visible = false;
+      }
+    }
   }
 
   // Reset launch state
@@ -637,7 +664,7 @@ function onMouseUp(e) {
     return;
   }
   // Clamp force and angle
-  const maxForce = 250;
+  const maxForce = 180; // Lower max force for less energy
   const minForce = 50;
   let force = THREE.MathUtils.clamp(dragVec.length() * 80, minForce, maxForce);
   let dir = dragVec.clone().normalize();
