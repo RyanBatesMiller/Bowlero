@@ -14,6 +14,9 @@ npm install --save three
 
 # vite
 npm install --save-dev vite
+
+# cannon-es
+npm install --save cannon-es 
 ```
 
 ## Now we need to start the web server and see the result in the browser. In your terminal, run:

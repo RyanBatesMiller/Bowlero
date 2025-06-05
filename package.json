@@ -10,6 +10,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "cannon-es": "^0.20.0",
     "three": "^0.176.0"
   },
   "devDependencies": {
