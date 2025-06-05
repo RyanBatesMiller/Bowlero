@@ -745,8 +745,8 @@ function update() {
       launchTime = now;
     }
 
-    // Wait 3 seconds after launch for longer lane
-    if (now - launchTime >= 3000) {
+    // Wait 5 seconds after launch for longer lane
+    if (now - launchTime >= 5000) {
       rollCommitted = true;
       commitRoll();
       launchTime = null; // reset for next turn
