@@ -746,7 +746,7 @@ function update() {
     }
 
     // Wait 3 seconds after launch for longer lane
-    if (now - launchTime >= 3000) {
+    if (now - launchTime >= 4000) {
       rollCommitted = true;
       commitRoll();
       launchTime = null; // reset for next turn
@@ -1178,6 +1178,12 @@ function resetGame() {
   scoredPins.clear();
   // Reset score and state
   score.reset && score.reset();
+  document.querySelectorAll('#score-sheet .roll').forEach(cell => {
+    cell.innerText = '';
+  });
+  document.querySelectorAll('#score-sheet .total').forEach(cell => {
+    cell.innerText = '';
+  });
   currentFrame = 1;
   currentRoll = 1;
   pinsThisRoll = 0;
