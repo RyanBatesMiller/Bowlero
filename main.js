@@ -212,6 +212,8 @@ let autoResetPending = false;
 let gameOver = false;
 const standingPins = []; // Track which pins are standing (true = standing, false = knocked down)
 
+let neonTex = null;
+
 // Initialize the physics world
 function createPhysics() {
   world = new CANNON.World();
@@ -287,31 +289,27 @@ function spawnPin(position, pinMaterial) {
 
   body.updateMassProperties();
 
-  // — 3) Position & sleep until the ball is launched —
   body.position.set(position.x,
                     position.y + halfH + margin,
                     position.z);
   body.sleep();
   world.addBody(body);
 
-  // optional: kill any pure Y‐spin and add damping
   body.angularFactor.set(1, 0, 1);
   body.angularDamping  = 0.8;
   body.linearDamping   = 0.1;
 
-  // — 4) Wrap your visual model + optional debug hull —
   const wrapper = new THREE.Group();
   wrapper.position.copy(body.position);
   wrapper.quaternion.copy(body.quaternion);
 
-  // Your real pin mesh
   const mesh = pinTemplate.clone(true);
   mesh.position.set(0, -halfH, 0);
   wrapper.add(mesh);
 
   getScene().add(wrapper);
 
-  // — 5) track for sync & scoring —
+  // track for sync & scoring —
   pinBodies.push(body);
   pinMeshes.push(new Transform(wrapper));
   pinOriginalPositions.push(body.position.clone());
@@ -335,53 +333,239 @@ function spawnAllPins(pinMaterial) {
   });
 }
 
+let iconMesh = null;
+let iconVisible = true;
+let iconTimer = 0;
+
 // Setup scene, physics, and camera
 function start() {
 
   const { pinMaterial, ballMaterial } = createPhysics();
 
-  // Lane surface - realistic bowling lane dimensions
   const texLoader = new THREE.TextureLoader();
   const laneTex = texLoader.load('textures/bowling.jpg', tex => {
     tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-    // Adjust texture tiling for realistic proportions
-    tex.repeat.set(1, 15); // 1 tile across width, 15 tiles along length
+    tex.repeat.set(1, 15);
+    tex.encoding = THREE.sRGBEncoding;
+  });
+  const lane2Tex = texLoader.load('textures/bowling2.jpg', tex => {
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(1, 15);
     tex.encoding = THREE.sRGBEncoding;
   });
 
-  const laneMat = new THREE.MeshPhongMaterial({ map: laneTex });
-  // Standard bowling lane (scaled appropriately)
-  const laneGeo = new THREE.PlaneGeometry(4.7, 60);
+  const laneMat = new THREE.MeshPhongMaterial({
+    map: laneTex,
+    shininess: 100,
+    specular: 0xaaaaaa
+  });
+
+  const laneGeo = new THREE.BoxGeometry(6, 60.2, 0.2);
   const laneMesh = new THREE.Mesh(laneGeo, laneMat);
-
-  laneMesh.rotation.x = -Math.PI/2;
-  laneMesh.position.set(0, 0, -15); // Center the lane properly
+  laneMesh.rotation.x = -Math.PI / 2;
+  laneMesh.position.set(0, -0.1, -15);
   laneMesh.receiveShadow = true;
-
   getScene().add(laneMesh);
+
+  const lane2Mat = new THREE.MeshPhongMaterial({
+    map: lane2Tex,
+    shininess: 20,
+    specular: 0xaaaaaa
+  });
+
+  const lane2Geo = new THREE.BoxGeometry(70, 90, 0.2);
+  const lane2Mesh = new THREE.Mesh(lane2Geo, lane2Mat);
+  lane2Mesh.rotation.x = -Math.PI / 2;
+  lane2Mesh.position.set(0, -0.3, -15);
+  lane2Mesh.receiveShadow = true;
+  getScene().add(lane2Mesh);
+
+  //rails
+  const neonLoader = new THREE.TextureLoader();
+  neonTex = neonLoader.load('textures/neon.jpg', tex => {
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.RepeatWrapping;
+    tex.center.set(0.5, 0.5);
+    tex.rotation = -Math.PI / 2;
+    tex.repeat.set(20, 1);
+
+    tex.encoding = THREE.sRGBEncoding;
+  });
+
+  const laneWidth = 4.7;
+  const laneLength = 60;
+
+  // 1) Create a long, thin box for the rail geometry:
+  const railThickness = 0.5;
+  const railHeight = 0.2;
+  const railGeo = new THREE.BoxGeometry(
+    railThickness,
+    railHeight,
+    laneLength
+  );
+
+  // 2) Give it a blue emissive material:
+  const railMat = new THREE.MeshPhongMaterial({
+    map: neonTex,
+    emissive: 0xFF0000,
+    emissiveIntensity: 0.1,
+    shininess: 20
+  });
+
+  // 3) Make two rails and position them on either side of the lane:
+  const leftRail = new THREE.Mesh(railGeo, railMat);
+  leftRail.position.set(
+    - (laneWidth / 2 + railThickness / 2), // x = −(half‐lane − half‐thickness)
+    0,                        // y = raise it just above the floor
+    -15                                     // z = same as laneMesh.position.z
+  );
+  leftRail.receiveShadow = true;
+  leftRail.castShadow = false;
+  getScene().add(leftRail);
+
+  const rightRail = leftRail.clone();
+  rightRail.position.x = + (laneWidth / 2 + railThickness / 2);
+  getScene().add(rightRail);
+
+  //archways
+
+  const archLoader = new THREE.TextureLoader();
+	const archTex = archLoader.load('textures/neon2.png', tex => {
+	  tex.wrapS = THREE.RepeatWrapping;
+	  tex.wrapT = THREE.RepeatWrapping;
+	  tex.repeat.set(1, 1);
+	  tex.encoding = THREE.sRGBEncoding;
+	});
+
+	const archMat = new THREE.MeshBasicMaterial({
+	  map: archTex,
+	  transparent: false,
+	  side: THREE.DoubleSide,
+	});
+
+	const pinZ          = -17;
+	const postHeight    = 4;
+	const postThickness = 0.4;
+	const postDepth     = 10;
+
+	const postGeo = new THREE.BoxGeometry(
+	  postThickness,
+	  postHeight,
+	  postDepth
+	);
+
+	const leftPost = new THREE.Mesh(postGeo, archMat);
+	leftPost.position.set(
+	  - (laneWidth / 2 + postThickness + 1.5),
+	    postHeight / 2,
+	  pinZ
+	);
+	getScene().add(leftPost);
+
+	const rightPost = leftPost.clone();
+	rightPost.position.x =   (laneWidth / 2 + postThickness + 1.5);
+	getScene().add(rightPost);
+
+	const postGeo2 = new THREE.BoxGeometry(
+		7, postHeight,
+	  postDepth
+	);
+
+	const postGeo3 = new THREE.BoxGeometry(
+		15, postHeight * 4.2,
+	  postDepth
+	);
+
+	const backMat = new THREE.MeshBasicMaterial({
+	  map: lane2Tex,
+	  color: 0x444444,
+	  transparent: false,
+	  side: THREE.DoubleSide,
+	});
+
+	const backMat2 = new THREE.MeshBasicMaterial({
+	  color: 0x353535,
+	  transparent: false,
+	  side: THREE.DoubleSide,
+	});
+	const backPost = new THREE.Mesh(postGeo2, backMat);
+	backPost.position.set(
+	  0, postHeight / 2, pinZ - 5
+	);
+	getScene().add(backPost);
+
+	const backPost2 = new THREE.Mesh(postGeo3, backMat2);
+	backPost2.position.set(
+	  0, postHeight, pinZ - 7
+	);
+	getScene().add(backPost2);
+
+	//icon
+	const iconLoader = new THREE.TextureLoader();
+  const iconTex = iconLoader.load('textures/icon.png', tex => {
+    tex.encoding = THREE.sRGBEncoding;
+  });
+  const iconMat = new THREE.MeshBasicMaterial({
+    map: iconTex,
+    transparent: true,
+    side: THREE.DoubleSide
+  });
+  const iconGeo = new THREE.PlaneGeometry(8, 6);
+  iconMesh = new THREE.Mesh(iconGeo, iconMat);
+  // position it above the arch beam:
+  iconMesh.position.set(0,
+    postHeight + (postThickness + 0.5) / 2 + 2.5,
+    pinZ
+  );
+  getScene().add(iconMesh);
+
+	const archWidth = laneWidth + postThickness * 2 + 1.3;
+	const beamGeo = new THREE.BoxGeometry(
+	  archWidth + 2,
+	  postThickness + 0.5,
+	  postDepth + 0.3
+	);
+
+	const archBeam = new THREE.Mesh(beamGeo, archMat);
+	archBeam.position.set(
+	  0, postHeight, pinZ
+	);
+	getScene().add(archBeam);
 
   // Pins
   spawnAllPins(pinMaterial);
 
   // Camera - adjusted for longer lane
   camera = getCamera();
-  camera.setPosition(Vector3(0, 3, 20));
+  camera.setPosition(Vector3(0, 4.2, 20));
   camera.setRotation(Vector3(0, 0, 0));
 
   // Ball mesh - start position adjusted
-  ballMesh = spawnSphere(
+    ballMesh = spawnSphere(
     Vector3(0, 0.25, 15),
     Vector3(0, 0, 0),
     Vector3(0.42, 0.42, 0.42),
-    0x7777FF
+    0xFFFFFF
   );
 
-  // Ball physics body - start position adjusted
+  const loader = new THREE.TextureLoader();
+  loader.load('textures/ball.png', texture => {
+    texture.encoding = THREE.sRGBEncoding;
+    texture.wrapS = THREE.ClampToEdgeWrapping;
+    texture.wrapT = THREE.ClampToEdgeWrapping;
+    const threeMesh = ballMesh.o3d;
+    threeMesh.material = new THREE.MeshPhongMaterial({ 
+    map: texture,
+    shininess: 15,
+    specular: 0xeeeeee
+    });
+  });
+
   const ballShape = new CANNON.Sphere(0.42);
-  ballBody = new CANNON.Body({ mass: 6.35, material: ballMaterial }); // 14 lbs (6.35 kg)
+  ballBody = new CANNON.Body({ mass: 6.35, material: ballMaterial });
   ballBody.addShape(ballShape);
   ballBody.position.set(0, 0.42, 15);
-  ballBody.linearDamping = 0.12; // More damping for less energy transfer
+  ballBody.linearDamping = 0.12;
   world.addBody(ballBody);
 
   hasLaunched = false;
@@ -473,6 +657,7 @@ function commitRoll() {
 
 
 let rollCommitted = false;
+let iconTime = 0;
 
 // Main loop: physics step, sync meshes, input handling
 function update() {
@@ -480,7 +665,20 @@ function update() {
   const dt = getDeltaTime();
   world.step(1/120, dt, 10);
 
-  // — Ball sync (unchanged) —
+  if (neonTex) {
+    const scrollSpeed = 2.0;
+    neonTex.offset.x += scrollSpeed * dt;
+  }
+
+  iconTime += getDeltaTime() * 2;
+	const intensity = 0.6 + 0.3 * Math.sin(iconTime * 2.0);
+	iconMesh.material.color.setRGB(intensity, intensity, intensity);
+
+  const mesh = ballMesh.o3d;
+  mesh.position.copy(ballBody.position);
+  mesh.quaternion.copy(ballBody.quaternion);
+
+  // — Ball sync —
   const b = ballBody.position;
   ballMesh.translateWorld(Vector3(
     b.x - ballMesh.position().x,
@@ -525,7 +723,7 @@ function update() {
     }
   }
 
-  camera.lookAt(ballMesh.position());
+  camera.lookAt(ballMesh.position().add(new THREE.Vector3(0, 2, 0)));
 
   // Update arrow if visible and dragging
   if (arrowVisible && mouseDown) updateArrow();
@@ -536,8 +734,15 @@ new GLTFLoader().load(
   '/models/pin.glb',
   (gltf) => {
     pinTemplate = gltf.scene;
-    pinTemplate.traverse(node => {
+    pinTemplate.traverse((node) => {
       if (node.isMesh) {
+        const oldMat = node.material;
+        node.material = new THREE.MeshPhongMaterial({
+          map: oldMat.map || null,
+          color: oldMat.color || new THREE.Color(0xffffff),
+          shininess: 100,
+          specular: 0xdddddd
+        });
         node.castShadow    = true;
         node.receiveShadow = true;
       }
@@ -546,7 +751,7 @@ new GLTFLoader().load(
     init(start, update);
   },
   undefined,
-  (err) => console.error('Failed to load pin model:', err)
+  (err) => console.error(err)
 );
 
 function resetPinsForNewFrame() {
@@ -647,33 +852,36 @@ function onMouseMove(e) {
   }
 }
 
+let aimOffsetSeed = Math.random() * 10000;
+const AIM_FREQUENCY = 0.005;
+const AIM_AMPLITUDE = 0.042;
+
 function onMouseUp(e) {
   if (!mouseDown) return;
   mouseDown = false;
   hideArrow();
-  if (hasLaunched || gameOver) {
-    console.log('[onMouseUp] Ignored: hasLaunched or gameOver');
-    return;
-  }
-  // Calculate launch vector
+  if (hasLaunched || gameOver) return;
+
   const from = dragStart;
   const to = dragEnd;
   const dragVec = new THREE.Vector3().subVectors(from, to);
-  console.log('[onMouseUp] Drag vector:', dragVec);
-  // Only allow forward throws (negative z)
-  if (dragVec.length() < 0.2 || dragVec.z >= 0) {
-    console.log('[onMouseUp] Drag too short or not forward, ignoring throw.');
-    return;
-  }
-  // Clamp force and angle
-  const maxForce = 180; // Lower max force for less energy
-  const minForce = 50;
-  let force = THREE.MathUtils.clamp(dragVec.length() * 80, minForce, maxForce);
+  if (dragVec.length() < 0.2 || dragVec.z >= 0) return;
+
+  // Compute base direction
   let dir = dragVec.clone().normalize();
-  // Only allow small angles left/right
   dir.y = 0;
   dir.normalize();
-  // Apply impulse
+
+  // Apply time-varying sine-wave offset along X:
+  const t = performance.now() * AIM_FREQUENCY + aimOffsetSeed;
+  const wobble = Math.sin(t) * AIM_AMPLITUDE;
+  dir.x += wobble;
+  dir.normalize();
+
+  const maxForce = 180;
+  const minForce = 50;
+  let force = THREE.MathUtils.clamp(dragVec.length() * 80, minForce, maxForce);
+
   hasLaunched = true;
   ballBody.velocity.setZero();
   ballBody.angularVelocity.setZero();
@@ -713,7 +921,6 @@ function updateArrow() {
     arrowHelper.visible = false;
     return;
   }
-  // Only show forward throws
   if (dragVec.z >= 0) {
     arrowHelper.visible = false;
     return;
@@ -721,15 +928,21 @@ function updateArrow() {
   arrowHelper.visible = true;
   const ballPos = ballMesh.position();
   arrowHelper.position.copy(ballPos);
-  const dir = dragVec.clone().normalize();
+
+  let dir = dragVec.clone().normalize();
   dir.y = 0;
   dir.normalize();
+
+  // apply the same time-varying sine‐wave offset
+  const t = performance.now() * AIM_FREQUENCY + aimOffsetSeed;
+  const wobble = Math.sin(t) * AIM_AMPLITUDE;
+  dir.x += wobble;
+  dir.normalize();
+
   arrowHelper.setDirection(dir);
-  // Clamp arrow length
+
   let len = THREE.MathUtils.clamp(dragVec.length(), 0.7, 4.0);
   arrowHelper.setLength(len, 0.7, 0.4);
-  // Debug
-  console.log('[updateArrow] Arrow dir:', dir, 'len:', len);
 }
 
 function hideArrow() {

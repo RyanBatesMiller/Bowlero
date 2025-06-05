@@ -227,9 +227,8 @@ export function init(startCallback, updateCallback) {
     1000
   );
   // Position camera for good view of the lane
-  // Place it behind the foul line, looking down toward the pins
-  camera.position.set(0, 2, 8); // Higher and further back
-  camera.lookAt(0, 0.5, -8);    // Look toward pin area
+  camera.position.set(0, 0, 8); 
+  camera.lookAt(0, 0.5, -8);
 
   // 3) Create and configure the Renderer
   renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -238,17 +237,19 @@ export function init(startCallback, updateCallback) {
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   document.body.appendChild(renderer.domElement);
 
-  // Expose renderer for mouse picking in main.js
   window.renderer = renderer;
 
-  // 4) Lighting - improved for better lane visibility
-  const ambient = new THREE.AmbientLight(0xffffff, 0.6);
+  const ambient = new THREE.AmbientLight(0xffffff, 1.5);
   scene.add(ambient);
 
-  // Main directional light
-  const dl = new THREE.DirectionalLight(0xffffcc, 1.2);
-  dl.position.set(0, 15, 0); // Directly overhead like bowling alley lights
+  const dl = new THREE.DirectionalLight(0xffffcc, 1.8);
+
+  const horizDist = 8;
+  const xOffset = Math.sin(Math.PI / 6) * horizDist;
+  const zOffset = horizDist;
+  dl.position.set(xOffset, 5, zOffset);
   dl.castShadow = true;
+
   dl.shadow.camera.near   = 0.1;
   dl.shadow.camera.far    = 50;
   dl.shadow.camera.left   = -15;
@@ -257,12 +258,20 @@ export function init(startCallback, updateCallback) {
   dl.shadow.camera.bottom = -25;
   dl.shadow.mapSize.width  = 4096;
   dl.shadow.mapSize.height = 4096;
+
+  // Aim at the pins around z = –12:
+  dl.target.position.set(0, 0, -12);
   scene.add(dl.target);
   scene.add(dl);
 
-  // Additional side lighting for depth
-  const sideLight = new THREE.DirectionalLight(0xffffff, 0.3);
-  sideLight.position.set(5, 8, -5);
+  const sideLight = new THREE.DirectionalLight(0xffffff, 1);
+
+  const sideX = -Math.sin(Math.PI / 6) * horizDist;
+  const sideZ = horizDist;
+  sideLight.position.set(sideX, 5, sideZ);
+
+  sideLight.target.position.set(0, 0, -12);
+  scene.add(sideLight.target);
   scene.add(sideLight);
 
   // 5) Call the user‐provided "start" callback
