@@ -597,7 +597,7 @@ function commitRoll() {
     setRoll(currentFrame, currentRoll, pinsThisRoll);
   }
 
- const frameScores = score.getFrameScores();
+  const frameScores = score.getFrameScores();
   let cumulative = 0;
 
   frameScores.forEach((score, i) => {
@@ -609,7 +609,7 @@ function commitRoll() {
     }
   });
 
-  // Frame progression logic
+  // --- Frame progression logic ---
   if (currentFrame < 10) {
     if (pinsThisRoll === 10 && currentRoll === 1) {
       // Strike: next frame, reset all pins
@@ -632,27 +632,59 @@ function commitRoll() {
       resetPinsForNewFrame();
     }
   } else {
-    // 10th frame logic (leave as-is for now)
-    setRoll(currentFrame, currentRoll, pinsThisRoll === 10 ? 'X' : pinsThisRoll);
+    // --- 10th frame logic ---
+    // Track how many pins were knocked down on first roll
     if (currentRoll === 1) {
+      if (pinsThisRoll === 10) {
+        // Strike: reset all pins for second roll
+        resetPinsForNewFrame();
+      } else {
+        // Not a strike: hide knocked-down pins for second roll
+        for (let i = 0; i < standingPins.length; i++) {
+          if (!standingPins[i]) {
+            pinMeshes[i].o3d.visible = false;
+          }
+        }
+      }
       currentRoll = 2;
     } else if (currentRoll === 2) {
-      const lastTwo = score.rolls.slice(-2);
-      if (lastTwo[0] === 10 || lastTwo[0] + lastTwo[1] === 10) {
+      const firstRoll = score.rolls[score.rolls.length - (pinsThisRoll === 10 ? 2 : 2)];
+      const secondRoll = pinsThisRoll;
+      const firstWasStrike = firstRoll === 10;
+      const spare = !firstWasStrike && (firstRoll + secondRoll === 10);
+
+      if (firstWasStrike || spare) {
+        // If strike or spare in first two rolls, reset all pins for third roll
+        resetPinsForNewFrame();
         currentRoll = 3;
       } else {
-        currentFrame++; 
+        // Otherwise, game over after second roll
+        currentFrame++;
         gameOver = true;
       }
     } else {
-      currentFrame++; 
+      // Third roll (only possible after strike or spare in first two rolls)
+      currentFrame++;
       gameOver = true;
     }
-    // For 10th frame, always reset all pins for each roll
-    resetPinsForNewFrame();
   }
 
   pinsThisRoll = 0;
+
+  // --- Show end popup if game over ---
+  if (gameOver) {
+    // Calculate final score
+    const frameScores = score.getFrameScores();
+    let total = 0;
+    for (let i = 0; i < frameScores.length; ++i) {
+      if (frameScores[i] != null) total += frameScores[i];
+    }
+    // Update high score if needed
+    const mode = getMode();
+    setHighScore(mode, total);
+    updateRecordScoreUI();
+    showEndPopup(total, getHighScores()[mode]);
+  }
 }
 
 
@@ -780,12 +812,25 @@ function resetForNextRoll() {
   ballMesh.setPosition(Vector3(0, 0.25, 15));
   ballMesh.setRotation(Vector3(0, 0, 0));
 
-  // Hide knocked-down pins ONLY if it's the second roll of a frame (not after strike/new frame)
-  // If currentRoll === 2, we just finished the first roll and are about to do the second roll
-  if (currentRoll === 2 && currentFrame <= 10) {
-    for (let i = 0; i < standingPins.length; i++) {
-      if (!standingPins[i]) {
-        pinMeshes[i].o3d.visible = false;
+  // --- 10th frame special handling ---
+  if (currentFrame === 10) {
+    if (currentRoll === 2) {
+      // After first roll, if not strike, hide knocked-down pins for second roll
+      // (handled in commitRoll, but ensure here too for safety)
+      for (let i = 0; i < standingPins.length; i++) {
+        if (!standingPins[i]) {
+          pinMeshes[i].o3d.visible = false;
+        }
+      }
+    }
+    // After strike or spare, pins are reset in commitRoll
+  } else {
+    // Hide knocked-down pins ONLY if it's the second roll of a frame (not after strike/new frame)
+    if (currentRoll === 2 && currentFrame <= 10) {
+      for (let i = 0; i < standingPins.length; i++) {
+        if (!standingPins[i]) {
+          pinMeshes[i].o3d.visible = false;
+        }
       }
     }
   }
@@ -1016,4 +1061,142 @@ function showFxMessage(text) {
   setTimeout(() => {
     fxMessage.style.opacity = 0;
   }, 1200);
+}
+
+// --- High Score Logic ---
+function getMode() {
+  // Use window.bowleroMode if set (from game.html), otherwise default to 'easy'
+  return (window.bowleroMode === 'hard') ? 'hard' : 'easy';
+}
+function getHighScores() {
+  let hs = { easy: 0, hard: 0 };
+  try {
+    const saved = JSON.parse(localStorage.getItem('bowleroHighScores'));
+    if (saved && typeof saved.easy === 'number' && typeof saved.hard === 'number') {
+      hs = saved;
+    }
+  } catch {}
+  return hs;
+}
+function setHighScore(mode, score) {
+  let hs = getHighScores();
+  if (score > hs[mode]) {
+    hs[mode] = score;
+    localStorage.setItem('bowleroHighScores', JSON.stringify(hs));
+  }
+}
+function getCurrentHighScore() {
+  return getHighScores()[getMode()];
+}
+
+// --- Record Score UI (always visible) ---
+const recordScoreDiv = document.createElement('div');
+recordScoreDiv.id = 'record-score';
+Object.assign(recordScoreDiv.style, {
+  position: 'absolute',
+  top: '1%',
+  right: '2%', // <-- move to top right
+  fontFamily: "'Press Start 2P', sans-serif",
+  color: '#ff00ff',
+  fontSize: '18px',
+  background: 'rgba(0,0,0,0.7)',
+  padding: '10px 18px',
+  borderRadius: '10px',
+  border: '2px solid #ff00ff',
+  zIndex: 1003,
+  textShadow: '0 0 6px #ff00ff'
+});
+document.body.appendChild(recordScoreDiv);
+function updateRecordScoreUI() {
+  recordScoreDiv.innerHTML = `RECORD: <span style="color:#fff">${getCurrentHighScore()}</span>`;
+}
+updateRecordScoreUI();
+
+// --- End Game Popup ---
+const endPopup = document.createElement('div');
+endPopup.id = 'end-popup';
+Object.assign(endPopup.style, {
+  position: 'fixed',
+  top: '50%',
+  left: '50%',
+  transform: 'translate(-50%, -50%)',
+  fontFamily: "'Press Start 2P', sans-serif",
+  color: '#ff00ff',
+  fontSize: '32px',
+  background: 'rgba(0,0,0,0.95)',
+  padding: '48px 64px',
+  borderRadius: '20px',
+  border: '2px solid #ff00ff',
+  zIndex: 2001,
+  textAlign: 'center',
+  display: 'none',
+  boxShadow: '0 0 32px #ff00ff'
+});
+endPopup.innerHTML = `
+  <div id="end-score" style="font-size:40px; margin-bottom:18px;"></div>
+  <div id="end-record" style="font-size:22px; margin-bottom:32px;"></div>
+  <button id="replay-btn" style="
+    font-family: 'Press Start 2P', sans-serif;
+    font-size: 22px;
+    color: #fff;
+    background: #222;
+    border: 2px solid #ff00ff;
+    border-radius: 12px;
+    padding: 18px 48px;
+    cursor: pointer;
+    text-shadow: 0 0 6px #ff00ff;
+    transition: background 0.2s;
+  ">REPLAY</button>
+`;
+document.body.appendChild(endPopup);
+
+function showEndPopup(finalScore, recordScore) {
+  document.getElementById('end-score').innerHTML = `Your Score: <span style="color:#fff">${finalScore}</span>`;
+  document.getElementById('end-record').innerHTML = `All-Time Best: <span style="color:#fff">${recordScore}</span>`;
+  endPopup.style.display = 'block';
+}
+function hideEndPopup() {
+  endPopup.style.display = 'none';
+}
+document.getElementById('replay-btn').onclick = () => {
+  hideEndPopup();
+  resetGame();
+};
+
+// --- Game Reset Logic ---
+function resetGame() {
+  // Remove all pins and meshes
+  for (let i = 0; i < pinMeshes.length; i++) {
+    if (pinMeshes[i] && pinMeshes[i].o3d && pinMeshes[i].o3d.parent) {
+      pinMeshes[i].o3d.parent.remove(pinMeshes[i].o3d);
+    }
+  }
+  pinBodies.length = 0;
+  pinMeshes.length = 0;
+  pinOriginalPositions.length = 0;
+  standingPins.length = 0;
+  scoredPins.clear();
+  // Reset score and state
+  score.reset && score.reset();
+  currentFrame = 1;
+  currentRoll = 1;
+  pinsThisRoll = 0;
+  hasLaunched = false;
+  rollCommitted = false;
+  gameOver = false;
+  launchTime = null;
+  autoResetPending = false;
+  // Remove ball mesh if present
+  if (ballMesh && ballMesh.o3d && ballMesh.o3d.parent) {
+    ballMesh.o3d.parent.remove(ballMesh.o3d);
+  }
+  ballMesh = null;
+  ballBody = null;
+  // Remove any arrows
+  hideArrow();
+  // Remove fx message if visible
+  if (fxMessage) fxMessage.style.opacity = 0;
+  // Recreate everything
+  start();
+  updateRecordScoreUI();
 }
